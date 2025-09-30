@@ -3,65 +3,83 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Tilemaps;
 
-namespace TilemapBreaker 
+namespace TilemapBreaker
 {
-    
-
-    public class TileRayDestroyer : MonoBehaviour
+    public class RaycastTileBreaker : MonoBehaviour
     {
-        [Header("設定")]
-        /// <summary>
-        /// ぶっこわすタイルマップ
-        /// </summary>
+        [Header("Target")]
         public Tilemap targetTilemap;
-        /// <summary>
-        /// 破壊エフェクト
-        /// </summary>
+        [Header("Effect")]
         public GameObject explosionPrefab;
+        [Header("Audio")]
+        public AudioClip breakSound;
+        [Header("Setting")]
         public float maxDistance = 10f;
-        public float stepDelay = 0.05f; // タイル破壊の間隔（秒）
+        public float stepDelay = 0.05f;
+        public float destroyRadius = 0f; // 半径（少数も可）
 
-        public void Fire(Vector3 direction)
+        private Vector2 direction;
+
+        public void Fire(Vector2 dir)
         {
-            StartCoroutine(DestroyTilesAlongRay(direction));
+            direction = dir.normalized;
+            StartCoroutine(DestroyTilesAlongRay());
         }
 
-        private IEnumerator DestroyTilesAlongRay(Vector3 direction)
+        private IEnumerator DestroyTilesAlongRay()
         {
             if (targetTilemap == null) yield break;
 
-            // 開始位置
             Vector3 startPos = transform.position;
-            Vector3 endPos = startPos + (Vector3)(direction.normalized * maxDistance);
+            Vector3 endPos = startPos + (Vector3)(direction * maxDistance);
 
-            // 線分をセルごとにサンプリング
-            List<Vector3Int> hitCells = RaycastTiles(startPos, endPos);
+            List<Vector3Int> lineCells = RaycastTiles(startPos, endPos);
 
-            // 近いセルから順番に処理
-            foreach (var cell in hitCells)
+            foreach (var cell in lineCells)
             {
-                TileBase tile = targetTilemap.GetTile(cell);
-                if (tile != null)
+                // 半径 destroyRadius 以内のセルを破壊（円形判定）
+                int radiusCeil = Mathf.CeilToInt(destroyRadius);
+                for (int dx = -radiusCeil; dx <= radiusCeil; dx++)
                 {
-                    // タイル削除
-                    targetTilemap.SetTile(cell, null);
-
-                    // 爆破エフェクト
-                    if (explosionPrefab != null)
+                    for (int dy = -radiusCeil; dy <= radiusCeil; dy++)
                     {
-                        Vector3 worldPos = targetTilemap.GetCellCenterWorld(cell);
-                        Instantiate(explosionPrefab, worldPos, Quaternion.identity);
-                    }
+                        Vector3Int targetCell = new Vector3Int(cell.x + dx, cell.y + dy, 0);
 
-                    // 1ステップ待つ
-                    yield return new WaitForSeconds(stepDelay);
+                        // セル中心と元セル中心の距離を測る
+                        Vector3 worldCenter = targetTilemap.GetCellCenterWorld(cell);
+                        Vector3 neighborCenter = targetTilemap.GetCellCenterWorld(targetCell);
+                        float dist = Vector3.Distance(worldCenter, neighborCenter);
+
+                        if (dist <= destroyRadius + 0.001f) // 半径以内なら破壊
+                        {
+                            TileBase tile = targetTilemap.GetTile(targetCell);
+                            if (tile != null)
+                            {
+                                targetTilemap.SetTile(targetCell, null);
+
+                                if (explosionPrefab != null)
+                                {
+                                    Vector3 worldPos = targetTilemap.GetCellCenterWorld(targetCell);
+                                    var effect = Instantiate(explosionPrefab, worldPos, Quaternion.identity);
+                                    Destroy(effect, 2f);
+                                }
+
+                                if (breakSound != null)
+                                {
+                                    AudioSource.PlayClipAtPoint(breakSound, transform.position);
+                                }
+                                
+                            }
+                        }
+                    }
                 }
+                
+
+                yield return new WaitForSeconds(stepDelay);
             }
         }
 
-        /// <summary>
-        /// 線分が通過するセルを求める（DDA方式）
-        /// </summary>
+        // Bresenham 直線アルゴリズム
         private List<Vector3Int> RaycastTiles(Vector3 start, Vector3 end)
         {
             List<Vector3Int> result = new List<Vector3Int>();
@@ -94,5 +112,4 @@ namespace TilemapBreaker
             return result;
         }
     }
-
 }
